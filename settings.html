@@ -22,7 +22,10 @@
     <script src="https://unpkg.com/midi-parser-js@4.0.4/src/main.js"></script>
 
     <script>
-        const correctNotes = new Set();        
+        let currentNotes = new Set();
+        let correctNotes = new Set();        
+        let timelineCursor = 0;
+        let loadedTimeline = [];
 
         // when we receive a message from the opener,
         // it'll contain an `id`, an initial value,
@@ -43,8 +46,6 @@
             var value = data.value;
             var label = data.label;
             var flag = data.flag;
-
-            console.log(data);
 
             var labelEl = document.createElement('label');
             labelEl.textContent = label;
@@ -75,18 +76,224 @@
                 const u8buf = new Uint8Array(data);
                 const parsed = MidiParser.parse(u8buf);
                 console.log({parsed});
+                window.parsed = parsed;
+                const timeline = mergeNoteOffEvents(mergeTracks(parsed.track.map(t => t.event).map(filterNotes).map(flattenTrack)));
+                startMidiTrack(timeline);
             };
             reader.readAsArrayBuffer(file)
+        }
+
+        function renderCurrentChord() {
+            correctNotes = new Set();
+
+            for (const note of correctNotes) {
+                if (currentNotes.has(note)) {
+                    window.opener.postMessage({
+                        kind: 'note',
+                        note: note,
+                        color: 'red'
+                    }, '*');
+                } else {
+                    window.opener.postMessage({
+                        kind: 'note',
+                        note: note,
+                        color: 'black'
+                    }, '*');
+                }
+            }
+
+            if (timelineCursor < loadedTimeline.length) {
+                const event = loadedTimeline[timelineCursor];
+                for (const noteEvent of event.events) {
+                    if (noteEvent.on) {
+                        correctNotes.add(noteEvent.note);
+                    } else {
+                        correctNotes.delete(noteEvent.note);
+                    }
+                }
+            }
+
+            for (const note of correctNotes) {
+                if (currentNotes.has(note)) {
+                    window.opener.postMessage({
+                        kind: 'note',
+                        note: note,
+                        color: 'green'
+                    }, '*');
+                } else {
+                    window.opener.postMessage({
+                        kind: 'note',
+                        note: note,
+                        color: 'white'
+                    }, '*');
+                }
+            }
+
+        }
+
+        function startMidiTrack(timeline) {
+            currentNotes = new Set();
+            correctNotes = new Set();
+            loadedTimeline = timeline;
+            timelineCursor = 0;
+            renderCurrentChord();
+        }
+
+        function checkChord() {
+            const correct = currentNotes.size === correctNotes.size && [...currentNotes].every(note => correctNotes.has(note));
+            if (correct) {
+                timelineCursor++;
+                renderCurrentChord();
+            }
+        }
+
+        // Flattens a timeline's events, such that
+        // any single event that contains only note-off
+        // events is merged into the next event.
+        function mergeNoteOffEvents(timeline) {
+            const events = [];
+            let pendingNoteOffs = [];
+
+            for (const event of timeline) {
+                const allOff = event.events.every(e => !e.on);
+                if (allOff) {
+                    for (const noteEvent of event.events) {
+                        pendingNoteOffs.push(noteEvent);
+                    }
+                } else {
+                    const mustStayOn = new Set(event.events.filter(e => e.on).map(e => e.note));
+
+                    const newEvent = {
+                        time: event.time,
+                        events: [...event.events, ...pendingNoteOffs].filter(e => e.on || !mustStayOn.has(e.note))
+                    };
+                    events.push(newEvent);
+                    pendingNoteOffs = [];
+                }
+            }
+
+            return events;
+        }
+
+        // Filters a track for all note on/off events
+        // (type 9 and 8, respectively) and returns
+        // a list of note on/off events.
+        function filterNotes(track) {
+            const events = [];
+            let lastEmittedTime = 0;
+            let currentTime = 0;
+
+            for (let i = 0; i < track.length; i++) {
+                currentTime += track[i].deltaTime;
+                const event = track[i];
+                if (event.type === 8 || event.type === 9) {
+                    const noteString = midiNoteString(event.data[0]);
+                    events.push({deltaTime: currentTime - lastEmittedTime, on: event.type === 9, note: noteString});
+                    lastEmittedTime = currentTime;
+                }
+            }
+
+            return events;
+        }
+
+        // Takes a track (of events) and flattens it into a list of
+        // events based on the deltaTime property of each.
+        function flattenTrack(track) {
+            const events = [];
+            let currentEvent = [];
+            let currentTime = 0;
+            for (let i = 0; i < track.length; i++) {
+                const event = track[i];
+                if (event.deltaTime) {
+                    events.push({time: currentTime, events: currentEvent});
+                    currentTime += event.deltaTime;
+                    currentEvent = [];
+                }
+                currentEvent.push(event);
+            }
+            if (currentEvent.length > 0) {
+                events.push({time: currentTime, events: currentEvent});
+            }
+            return events;
+        }
+
+        // Takes multiple flattened tracks and merges them into a single
+        // list of events, sorted by time, and merging events that occur
+        // at the same time.
+        function mergeTracks(tracks) {
+            const events = [];
+
+            const cursors = [];
+            const trackOffsets = [];
+            for (let i = 0; i < tracks.length; i++) {
+                cursors.push(0);
+                trackOffsets.push(0);
+            }
+
+            let consideredTrack;
+            do {
+                consideredTrack = false;
+
+                let minTime = Infinity;
+                let relevantTracks = [];
+                for (let trackIdx = 0; trackIdx < tracks.length; trackIdx++) {
+                    const track = tracks[trackIdx];
+                    const cursor = cursors[trackIdx];
+                    if (cursor < track.length) {
+                        const event = track[cursor];
+                        const eventTime = event.time - trackOffsets[trackIdx];
+                        if (event.time < minTime) {
+                            minTime = event.time;
+                            relevantTracks = [trackIdx];
+                        } else if (event.time === minTime) {
+                            relevantTracks.push(trackIdx);
+                        }
+                    }
+                }
+
+                consideredTrack = relevantTracks.length > 0;
+
+                const newEvent = {
+                    time: minTime,
+                    events: []
+                };
+                
+                const relevantTracksSet = new Set(relevantTracks);
+
+                for (let trackIdx = 0; trackIdx < tracks.length; trackIdx++) {
+                    if (relevantTracksSet.has(trackIdx)) {
+                        const track = tracks[trackIdx];
+                        const cursor = cursors[trackIdx];
+                        const event = track[cursor];
+                        newEvent.events.push(...event.events);
+                        cursors[trackIdx]++;
+                        trackOffsets[trackIdx] = 0;
+                    } else {
+                        trackOffsets[trackIdx] += minTime;
+                    }
+                }
+
+                if (consideredTrack) {
+                    events.push(newEvent);
+                }
+            } while (consideredTrack);
+
+            return events;
+        }
+
+        const NOTES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'Bb', 'B'];
+        function midiNoteString(note) {
+            const octave = Math.floor(note / 12) - 1;
+            const noteName = NOTES[note % 12];
+            const noteString = `${noteName}${octave}`;   
+            return noteString;
         }
 
         function processNote(e) {
             // converts a note to its note string,
             // e.g. 60 -> 'C4', 61 -> 'C#4', 62 -> 'D4', etc.
             const note = e.data[1];
-            const notes = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'Bb', 'B'];
-            const octave = Math.floor(note / 12) - 1;
-            const noteName = notes[note % 12];
-            const noteString = `${noteName}${octave}`;
+            const noteString = midiNoteString(note);
 
             const noteIsOn = e.data[0] === 144;
         
@@ -104,6 +311,14 @@
                 note: noteString,
                 color: noteIsOn ? (noteIsCorrect ? 'green' : 'red') : (noteIsCorrect ? 'white' : 'black')
             }, '*');
+
+            if (noteIsOn) {
+                currentNotes.add(noteString);
+            } else {
+                currentNotes.delete(noteString);
+            }
+
+            checkChord();
         }
 
         // console log on window load

@@ -19,7 +19,11 @@
         }
     </style>
 
+    <script src="https://unpkg.com/midi-parser-js@4.0.4/src/main.js"></script>
+
     <script>
+        const correctNotes = new Set();        
+
         // when we receive a message from the opener,
         // it'll contain an `id`, an initial value,
         // a label, and optionally a `flag: true` property.
@@ -57,13 +61,111 @@
             inputEl.addEventListener('input', function (e) {
                 var value = flag ? e.target.checked : parseFloat(e.target.value);
                 window.opener.postMessage({
+                    kind: 'update',
                     id: id,
                     value: value
                 }, '*');
             });
         });
+
+        function loadMidiFile(file) {
+            const reader = new FileReader();
+            reader.onload = function (e) {
+                const data = e.target.result;
+                const u8buf = new Uint8Array(data);
+                const parsed = MidiParser.parse(u8buf);
+                console.log({parsed});
+            };
+            reader.readAsArrayBuffer(file)
+        }
+
+        function processNote(e) {
+            // converts a note to its note string,
+            // e.g. 60 -> 'C4', 61 -> 'C#4', 62 -> 'D4', etc.
+            const note = e.data[1];
+            const notes = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'Bb', 'B'];
+            const octave = Math.floor(note / 12) - 1;
+            const noteName = notes[note % 12];
+            const noteString = `${noteName}${octave}`;
+
+            const noteIsOn = e.data[0] === 144;
+        
+            const noteIsCorrect = correctNotes.has(noteString);
+
+            // sends a message to the opener with the note
+            // name and color. If the note is on and correct,
+            // the color is green; if the note is on and
+            // incorrect, the color is red; if the note is
+            // off and correct, the color is white; if
+            // the note is off and incorrect, the color is
+            // black.
+            window.opener.postMessage({
+                kind: 'note',
+                note: noteString,
+                color: noteIsOn ? (noteIsCorrect ? 'green' : 'red') : (noteIsCorrect ? 'white' : 'black')
+            }, '*');
+        }
+
+        // console log on window load
+        window.addEventListener('load', () => {
+            // get a list of all the midi input devices
+            // and stick them into the select #midi-input
+            navigator.requestMIDIAccess().then((midiAccess) => {
+                console.log('got midi access');
+
+                const inputs = midiAccess.inputs.values();
+                const selectEl = document.getElementById('midi-input');
+                for (let input = inputs.next(); input && !input.done; input = inputs.next()) {
+                    const optionEl = document.createElement('option');
+                    optionEl.textContent = input.value.name;
+                    selectEl.appendChild(optionEl);
+                }
+
+                // when the midi input changes, detach any existing
+                // note listeners and attach a new one to the new
+                // input.
+                const onChange = () => {
+                    const inputName = selectEl.value;
+                    const inputs = midiAccess.inputs.values();
+                    for (let input = inputs.next(); input && !input.done; input = inputs.next()) {
+                        if (input.value.name === inputName) {
+                            input.value.onmidimessage = (e) => {
+                                processNote(e);
+                            };
+                        } else {
+                            input.value.onmidimessage = null;
+                        }
+
+                        // store in local storage as the 'piano.midiInput'
+                        // key.
+                        localStorage.setItem('piano.midiInput', inputName);
+                    }
+                }
+
+                // restore from localstorage, only overwriting
+                // if it exists in local storage AND it's a valid
+                // item in the list
+                const midiInput = localStorage.getItem('piano.midiInput');
+                if (midiInput && Array.from(selectEl.options).some(option => option.textContent === midiInput)) {
+                    selectEl.value = midiInput;
+                }
+
+                selectEl.addEventListener('change', onChange);
+                onChange();
+            }).catch(err => {
+                console.log('no midi access:', err);
+            });
+        });
     </script>
 </head>
 <body>
+    <!-- allows midi files to be loaded here; when changed,
+    the midi file is loaded via `loadMidiFile()`. -->
+    <label for="midi-file">MIDI File</label>
+    <input id="midi-file" type="file" accept=".mid" onchange="loadMidiFile(this.files[0])">
+
+    <!-- list of midi input devices; blank for now, populated by the script above -->
+    <label for="midi-input">MIDI Input</label>
+    <select id="midi-input"></select>
 </body>
 </html>

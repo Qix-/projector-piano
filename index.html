@@ -114,26 +114,6 @@
                 };
             }
 
-            noteYellow(note) {
-                this.notes.set(note, '#ffff00');
-            }
-
-            noteGreen(note) {
-                this.notes.set(note, '#00ff00');
-            }
-
-            noteRed(note) {
-                this.notes.set(note, '#ff0000');
-            }
-
-            noteOff(note) {
-                this.notes.delete(note);
-            }
-
-            clearNotes() {
-                this.notes.clear();
-            }
-
             draw() {
                 // make the canvas size match the element size (using client rect)
                 this.el.width = this.el.clientWidth;
@@ -194,21 +174,6 @@
         }
 
         const piano = new Piano(document.querySelector('canvas'));
-        
-        // A loop that enables every single key from A0 to C8
-        // in red/yellow/green (repeating) so that no two keys
-        // of the same color are next to each other.
-        for (let octave = 0; octave <= 8; octave++) {
-            const keys = ['A', 'Bb', 'B', 'C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab'];
-            for (let i = 0; i < keys.length; i++) {
-                const absKeyIndex = (octave * 12) + i;
-                if (absKeyIndex >= 88) continue;
-                const key = keys[i];
-                const note = `${key}${octave}`;
-                const color = ['red', 'yellow', 'green'][absKeyIndex % 3];
-                piano.notes.set(note, color);
-            }
-        }
         piano.draw();
 
         // Creates a new window to adjust the metrics settings
@@ -308,11 +273,27 @@
         // Listen for posted messages from the child window
         // and update the piano metrics accordingly.
         window.addEventListener('message', (event) => {
-            const { id, value } = event.data;
+            const { kind, id, value } = event.data;
+            
+            if (kind !== 'update') return;
+
             properties[id] = value;
 
             // save the value to localStorage
             localStorage.setItem(`piano.${id}`, JSON.stringify(value));
+        });
+
+        // Listen for notes from the child window and
+        // set their colors / redraw.
+        window.addEventListener('message', (event) => {
+            const { kind, note, color } = event.data;
+
+            if (kind !== 'note') return;
+
+            console.log({ note, color });
+
+            piano.notes.set(note, color);
+            piano.draw();
         });
     </script>
 </body>

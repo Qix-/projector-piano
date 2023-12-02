@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Projector Piano</title>
+    <meta name="description" content="My Website">
+    <style>
+        body {
+            margin: 0;
+            padding: 1rem;
+            width: 100%;
+            overflow-x: hidden;
+            box-sizing: border-box;
+        }
+
+        body > * {
+            display: block;
+            width: 100%;
+        }
+    </style>
+
+    <script>
+        // when we receive a message from the opener,
+        // it'll contain an `id`, an initial value,
+        // a label, and optionally a `flag: true` property.
+        //
+        // when we do, create a label and an input - a slider
+        // if `!flag`, and a check box if `!!flag`.
+        //
+        // the sliders should be from 0..1 with a step of
+        // 0.00001.
+        //
+        // updates to all of these should be sent back to the
+        // opener, but just with the `id` and the new value
+        // (a number for sliders, or a boolean for flags).
+        window.addEventListener('message', function (e) {
+            var data = e.data;
+            var id = data.id;
+            var value = data.value;
+            var label = data.label;
+            var flag = data.flag;
+
+            console.log(data);
+
+            var labelEl = document.createElement('label');
+            labelEl.textContent = label;
+            document.body.appendChild(labelEl);
+
+            var inputEl = document.createElement('input');
+            inputEl.type = flag ? 'checkbox' : 'range';
+            inputEl.min = 0;
+            inputEl.max = 1;
+            inputEl.step = 0.00001;
+            inputEl.value = value;
+            document.body.appendChild(inputEl);
+
+            inputEl.addEventListener('input', function (e) {
+                var value = flag ? e.target.checked : parseFloat(e.target.value);
+                window.opener.postMessage({
+                    id: id,
+                    value: value
+                }, '*');
+            });
+        });
+    </script>
+</head>
+<body>
+</body>
+</html>

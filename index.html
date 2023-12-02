@@ -1,0 +1,319 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Projector Piano</title>
+    <meta name="description" content="My Website">
+    <style>
+        body {
+            background-color: #000000;
+            margin: 0;
+            padding: 0;
+            width: 100vw;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        canvas {
+            pointer-events: none;
+            width: 100vw;
+            height: 100vh;
+        }
+    </style>
+</head>
+<body>
+    <canvas width="100%" height="100%"></canvas>
+    <script>
+        // The offsets of keys relative to the A
+        // and next octave's A key, mapped to the
+        // domain [0, 1].
+        const relativeKeyOffset = {
+            'A': 0.0,
+            'A#': 0.0833,
+            get Bb() { return this['A#']; },
+            set Bb(value) { this['A#'] = value; },
+            'B': 0.166,
+            get Cb() { return this['B']; },
+            set Cb(value) { this['B'] = value; },
+            'B#': 0.25,
+            get C() { return this['B#']; },
+            set C(value) { this['B#'] = value; },
+            'C#': 0.333,
+            get Db() { return this['C#']; },
+            set Db(value) { this['C#'] = value; },
+            'D': 0.4166,
+            'D#': 0.5,
+            get Eb() { return this['D#']; },
+            set Eb(value) { this['D#'] = value; },
+            'E': 0.583,
+            get Fb() { return this['E']; },
+            set Fb(value) { this['E'] = value; },
+            'E#': 0.666,
+            get F() { return this['E#']; },
+            set F(value) { this['E#'] = value; },
+            'F#': 0.75,
+            get Gb() { return this['F#']; },
+            set Gb(value) { this['F#'] = value; },
+            'G': 0.833,
+            'G#': 0.9166,
+            get Ab() { return this['G#']; },
+            set Ab(value) { this['G#'] = value; },
+        };
+
+        // The color of each key. Even for keys
+        // that aren't 'real', such as E# and Fb,
+        // they still have a color.
+        const keyColor = {
+            'A': 'white',
+            'A#': 'black',
+            'Bb': 'black',
+            'B': 'white',
+            'Cb': 'white',
+            'B#': 'white',
+            'C': 'white',
+            'C#': 'black',
+            'Db': 'black',
+            'D': 'white',
+            'D#': 'black',
+            'Eb': 'black',
+            'E': 'white',
+            'Fb': 'white',
+            'E#': 'white',  
+            'F': 'white',
+            'F#': 'black',
+            'Gb': 'black',
+            'G': 'white',
+            'G#': 'black',
+            'Ab': 'black',
+        };
+
+        class Piano {
+            constructor(el) {
+                this.el = el;
+                this.ctx = this.el.getContext('2d');
+                this.notes = new Map();
+                this.metrics = {
+                    offsetX: 0.0,
+                    offsetY: 0.0,
+                    octaveWidth: 1/8,
+                    octaveOffset: 0.5,
+                    front: {
+                        black: 0.5,
+                        white: 0.55,
+                    },
+                    back: {
+                        black: 0.4,
+                        white: 0.45,
+                    },
+                    width: {
+                        black: 0.1,
+                        white: 0.15,
+                    },
+                    flipHorizontally: false,
+                    flipVertically: false,
+                };
+            }
+
+            noteYellow(note) {
+                this.notes.set(note, '#ffff00');
+            }
+
+            noteGreen(note) {
+                this.notes.set(note, '#00ff00');
+            }
+
+            noteRed(note) {
+                this.notes.set(note, '#ff0000');
+            }
+
+            noteOff(note) {
+                this.notes.delete(note);
+            }
+
+            clearNotes() {
+                this.notes.clear();
+            }
+
+            draw() {
+                // make the canvas size match the element size (using client rect)
+                this.el.width = this.el.clientWidth;
+                this.el.height = this.el.clientHeight;
+
+                // set the projection of the context such that
+                // the left side is 0 and the right side is 1.
+                this.ctx.setTransform(
+                    this.metrics.flipHorizontally ? -this.el.width : this.el.width,
+                    0,
+                    0,
+                    this.metrics.flipVertically ? -this.el.height : this.el.height,
+                    this.metrics.flipHorizontally ? this.el.width : 0,
+                    this.metrics.flipVertically ? this.el.height : 0,
+                );
+
+                // old transform, ignore
+                //this.ctx.setTransform(this.el.width, 0, 0, this.el.height, 0, 0);
+
+                // clear the canvas
+                this.ctx.clearRect(0, 0, 1, 1);
+
+                // draw the notes
+                for (const [note, color] of this.notes) {
+                    this.drawNote(note, color);
+                }
+            }
+
+            drawNote(note, color) {
+                const noteMetrics = this.calculateKeyMetrics(note);
+                this.ctx.fillStyle = color;
+                this.ctx.fillRect(
+                    noteMetrics.left,
+                    noteMetrics.top,
+                    noteMetrics.right - noteMetrics.left,
+                    noteMetrics.bottom - noteMetrics.top,
+                );
+            }
+
+            calculateKeyMetrics(note) {
+                const [key, octaveString] = note.match(/^([A-G][b#]?)(\d+)$/).slice(1);
+                const octave = parseInt(octaveString, 10);
+                const keyOffset = relativeKeyOffset[key];
+                const keyCenter = ((this.metrics.octaveWidth + (this.metrics.octaveOffset - 0.5)) * octave) + (keyOffset * this.metrics.octaveWidth);
+                const color = keyColor[key];
+                const keyLeft = keyCenter - this.metrics.width[color] / 2;
+                const keyRight = keyLeft + this.metrics.width[color];
+                const keyTop = this.metrics.back[color];
+                const keyBottom = this.metrics.front[color];
+
+                return {
+                    left: this.metrics.offsetX + keyLeft,
+                    right: this.metrics.offsetX + keyRight,
+                    top: this.metrics.offsetY + keyTop,
+                    bottom: this.metrics.offsetY + keyBottom,
+                }
+            }
+        }
+
+        const piano = new Piano(document.querySelector('canvas'));
+        
+        // A loop that enables every single key from A0 to C8
+        // in red/yellow/green (repeating) so that no two keys
+        // of the same color are next to each other.
+        for (let octave = 0; octave <= 8; octave++) {
+            const keys = ['A', 'Bb', 'B', 'C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab'];
+            for (let i = 0; i < keys.length; i++) {
+                const absKeyIndex = (octave * 12) + i;
+                if (absKeyIndex >= 88) continue;
+                const key = keys[i];
+                const note = `${key}${octave}`;
+                const color = ['red', 'yellow', 'green'][absKeyIndex % 3];
+                piano.notes.set(note, color);
+            }
+        }
+        piano.draw();
+
+        // Creates a new window to adjust the metrics settings
+        // of the piano. Opens 'settings.html'.
+        const settingsWindow = window.open('settings.html', 'settings', 'width=400,height=400');
+
+        // Simple proxy object that gets and sets the metrics
+        // and key offsets given a simple ID.
+        const properties = {
+            get offsetX() { return piano.metrics.offsetX; },
+            set offsetX(value) { piano.metrics.offsetX = value; piano.draw(); },
+            get offsetY() { return piano.metrics.offsetY; },
+            set offsetY(value) { piano.metrics.offsetY = value; piano.draw(); },
+            get octaveWidth() { return piano.metrics.octaveWidth; },
+            set octaveWidth(value) { piano.metrics.octaveWidth = value; piano.draw(); },
+            get octaveOffset() { return piano.metrics.octaveOffset; },
+            set octaveOffset(value) { piano.metrics.octaveOffset = value; piano.draw(); },  
+            get flipHorizontally() { return piano.metrics.flipHorizontally; },
+            set flipHorizontally(value) { piano.metrics.flipHorizontally = value; piano.draw(); },
+            get flipVertically() { return piano.metrics.flipVertically; },
+            set flipVertically(value) { piano.metrics.flipVertically = value; piano.draw(); },
+            get frontBlack() { return piano.metrics.front.black; },
+            set frontBlack(value) { piano.metrics.front.black = value; piano.draw(); },
+            get frontWhite() { return piano.metrics.front.white; },
+            set frontWhite(value) { piano.metrics.front.white = value; piano.draw(); },
+            get backBlack() { return piano.metrics.back.black; },
+            set backBlack(value) { piano.metrics.back.black = value; piano.draw(); },
+            get backWhite() { return piano.metrics.back.white; },
+            set backWhite(value) { piano.metrics.back.white = value; piano.draw(); },
+            get widthBlack() { return piano.metrics.width.black; },
+            set widthBlack(value) { piano.metrics.width.black = value; piano.draw(); },
+            get widthWhite() { return piano.metrics.width.white; },
+            set widthWhite(value) { piano.metrics.width.white = value; piano.draw(); },
+            get offsetA() { return relativeKeyOffset['A']; },
+            set offsetA(value) { relativeKeyOffset['A'] = value; piano.draw(); },
+            get offsetAb() { return relativeKeyOffset['Ab']; },
+            set offsetAb(value) { relativeKeyOffset['Ab'] = value; piano.draw(); },
+            get offsetB() { return relativeKeyOffset['B']; },
+            set offsetB(value) { relativeKeyOffset['B'] = value; piano.draw(); },
+            get offsetBb() { return relativeKeyOffset['Bb']; },
+            set offsetBb(value) { relativeKeyOffset['Bb'] = value; piano.draw(); },
+            get offsetC() { return relativeKeyOffset['C']; },
+            set offsetC(value) { relativeKeyOffset['C'] = value; piano.draw(); },
+            get offsetD() { return relativeKeyOffset['D']; },
+            set offsetD(value) { relativeKeyOffset['D'] = value; piano.draw(); },
+            get offsetDb() { return relativeKeyOffset['Db']; },
+            set offsetDb(value) { relativeKeyOffset['Db'] = value; piano.draw(); },
+            get offsetE() { return relativeKeyOffset['E']; },
+            set offsetE(value) { relativeKeyOffset['E'] = value; piano.draw(); },
+            get offsetEb() { return relativeKeyOffset['Eb']; },
+            set offsetEb(value) { relativeKeyOffset['Eb'] = value; piano.draw(); },
+            get offsetF() { return relativeKeyOffset['F']; },
+            set offsetF(value) { relativeKeyOffset['F'] = value; piano.draw(); },
+            get offsetG() { return relativeKeyOffset['G']; },
+            set offsetG(value) { relativeKeyOffset['G'] = value; piano.draw(); },
+            get offsetGb() { return relativeKeyOffset['Gb']; },
+            set offsetGb(value) { relativeKeyOffset['Gb'] = value; piano.draw(); },
+        };
+
+        // restore all values from localStorage (ignoring them if they don't exist)
+        // using the prefix `piano.<property>` and using `JSON.parse()` for each.
+        for (const key in properties) {
+            const value = localStorage.getItem(`piano.${key}`);
+            if (value !== null) {
+                properties[key] = JSON.parse(value);
+            }
+        }
+
+        settingsWindow.addEventListener('load', () => {
+            console.log('sending now');
+            settingsWindow.postMessage({ id: 'offsetX', value: properties.offsetX, label: 'X-Offset' }, '*');
+            settingsWindow.postMessage({ id: 'offsetY', value: properties.offsetY, label: 'Y-Offset' }, '*');
+            settingsWindow.postMessage({ id: 'octaveWidth', value: properties.octaveWidth, label: 'Octave Width' }, '*');
+            settingsWindow.postMessage({ id: 'octaveOffset', value: properties.octaveOffset, label: 'Octave Offset' }, '*');
+            settingsWindow.postMessage({ id: 'frontBlack', value: properties.frontBlack, label: 'Black Key Front' }, '*');
+            settingsWindow.postMessage({ id: 'backBlack', value: properties.backBlack, label: 'Black Key Back' }, '*');
+            settingsWindow.postMessage({ id: 'frontWhite', value: properties.frontWhite, label: 'White Key Front' }, '*');
+            settingsWindow.postMessage({ id: 'backWhite', value: properties.backWhite, label: 'White Key Back' }, '*');
+            settingsWindow.postMessage({ id: 'widthBlack', value: properties.widthBlack, label: 'Black Key Width' }, '*');
+            settingsWindow.postMessage({ id: 'widthWhite', value: properties.widthWhite, label: 'White Key Width' }, '*');
+            settingsWindow.postMessage({ id: 'flipHorizontally', value: properties.flipHorizontally, label: 'Flip Horizontally', flag: true }, '*');
+            settingsWindow.postMessage({ id: 'flipVertically', value: properties.flipVertically, label: 'Flip Vertically', flag: true }, '*');
+            settingsWindow.postMessage({ id: 'offsetA', value: properties.offsetA, label: 'A Offset' }, '*');
+            settingsWindow.postMessage({ id: 'offsetBb', value: properties.offsetBb, label: 'Bb Offset' }, '*');
+            settingsWindow.postMessage({ id: 'offsetB', value: properties.offsetB, label: 'B Offset' }, '*');
+            settingsWindow.postMessage({ id: 'offsetC', value: properties.offsetC, label: 'C Offset' }, '*');
+            settingsWindow.postMessage({ id: 'offsetDb', value: properties.offsetDb, label: 'Db Offset' }, '*');
+            settingsWindow.postMessage({ id: 'offsetD', value: properties.offsetD, label: 'D Offset' }, '*');
+            settingsWindow.postMessage({ id: 'offsetEb', value: properties.offsetEb, label: 'Eb Offset' }, '*');
+            settingsWindow.postMessage({ id: 'offsetE', value: properties.offsetE, label: 'E Offset' }, '*');
+            settingsWindow.postMessage({ id: 'offsetF', value: properties.offsetF, label: 'F Offset' }, '*');
+            settingsWindow.postMessage({ id: 'offsetGb', value: properties.offsetGb, label: 'Gb Offset' }, '*');
+            settingsWindow.postMessage({ id: 'offsetG', value: properties.offsetG, label: 'G Offset' }, '*');
+            settingsWindow.postMessage({ id: 'offsetAb', value: properties.offsetAb, label: 'Ab Offset' }, '*');
+        });
+
+        // Listen for posted messages from the child window
+        // and update the piano metrics accordingly.
+        window.addEventListener('message', (event) => {
+            const { id, value } = event.data;
+            properties[id] = value;
+
+            // save the value to localStorage
+            localStorage.setItem(`piano.${id}`, JSON.stringify(value));
+        });
+    </script>
+</body>
+</html>

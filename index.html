@@ -225,7 +225,6 @@
         }
 
         settingsWindow.addEventListener('load', () => {
-            console.log('sending now');
             settingsWindow.postMessage({ id: 'offsetX', value: properties.offsetX, label: 'X-Offset' }, '*');
             settingsWindow.postMessage({ id: 'offsetY', value: properties.offsetY, label: 'Y-Offset' }, '*');
             settingsWindow.postMessage({ id: 'octaveWidth', value: properties.octaveWidth, label: 'Octave Width' }, '*');
@@ -271,8 +270,6 @@
             const { kind, note, color } = event.data;
 
             if (kind !== 'note') return;
-
-            console.log({ note, color });
 
             piano.notes.set(note, color);
             piano.draw();

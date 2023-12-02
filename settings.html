@@ -20,6 +20,11 @@
     </style>
 
     <script src="https://unpkg.com/midi-parser-js@4.0.4/src/main.js"></script>
+    <script>
+        const MidiParser = window.MidiParser;
+    </script>
+    <script>window.module = {exports: {}};</script>
+    <script src="https://unpkg.com/smplr@0.11.3/dist/index.js"></script>
 
     <script>
         let currentNotes = new Set();
@@ -75,7 +80,6 @@
                 const data = e.target.result;
                 const u8buf = new Uint8Array(data);
                 const parsed = MidiParser.parse(u8buf);
-                console.log({parsed});
                 window.parsed = parsed;
                 const timeline = mergeNoteOffEvents(mergeTracks(parsed.track.map(t => t.event).map(filterNotes).map(flattenTrack)));
                 startMidiTrack(timeline);
@@ -289,23 +293,43 @@
             return noteString;
         }
 
+        const context = new AudioContext();
+        const piano = new SplendidGrandPiano(context);
+        piano.output.addEffect("reverb", new Reverb(context), 0.2);
+
+        function startContext() {
+            context.resume();
+        }
+
+        let pedalOn = false;
+        let sustainedNotes = new Set();
         function processNote(e) {
-            // converts a note to its note string,
-            // e.g. 60 -> 'C4', 61 -> 'C#4', 62 -> 'D4', etc.
+            if (e.data[0] === 176) {
+                if (e.data[1] === 64) {
+                    pedalOn = e.data[2] > 0;
+
+                    if (!pedalOn) {
+                        for (const note of sustainedNotes) {
+                            piano.stop(note);
+                        }
+                        sustainedNotes = new Set();
+                    }
+
+                    return;
+                }
+            }            
+
+            if (e.data[0] !== 144 && e.data[0] !== 128) {
+                return;
+            }
+
             const note = e.data[1];
             const noteString = midiNoteString(note);
-
+            const noteVelocity = e.data[2];
             const noteIsOn = e.data[0] === 144;
         
             const noteIsCorrect = correctNotes.has(noteString);
 
-            // sends a message to the opener with the note
-            // name and color. If the note is on and correct,
-            // the color is green; if the note is on and
-            // incorrect, the color is red; if the note is
-            // off and correct, the color is white; if
-            // the note is off and incorrect, the color is
-            // black.
             window.opener.postMessage({
                 kind: 'note',
                 note: noteString,
@@ -314,8 +338,19 @@
 
             if (noteIsOn) {
                 currentNotes.add(noteString);
+                piano.start({note: note, velocity: noteVelocity});
+
+                if (pedalOn) {
+                    sustainedNotes.delete(note);
+                }
             } else {
                 currentNotes.delete(noteString);
+                
+                if (pedalOn) {
+                    sustainedNotes.add(note);
+                } else {
+                    piano.stop(note);
+                }
             }
 
             checkChord();
@@ -374,6 +409,8 @@
     </script>
 </head>
 <body>
+    <button onclick="startContext()">Start Audio Context</button>
+
     <!-- allows midi files to be loaded here; when changed,
     the midi file is loaded via `loadMidiFile()`. -->
     <label for="midi-file">MIDI File</label>
